@@ -1,0 +1,10 @@
+*/.tfstate
+*/.tfstate.*
+*.tfvars
+*.tfplan
+*.tfstate.backup
+.terraform/
+.DS_Store
+
+*/.tfstate
+!.terraform/*.tfstate
