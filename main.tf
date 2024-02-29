@@ -16,6 +16,7 @@ resource "google_compute_subnetwork" "subnets" {
   ip_cidr_range = each.value.ip_cidr_range
   region        = each.value.subnet_region
   network       = google_compute_network.vpc.id
+  private_ip_google_access = true
 }
 
 resource "google_compute_route" "webapp_route" {
@@ -40,6 +41,13 @@ resource "google_compute_instance" "vm_instance" {
 
     mode = var.boot_disk.mode
   }
+
+  metadata = {
+    db_user     = google_sql_user.users.name
+    db_password = random_password.password.result
+    db_host     = google_sql_database_instance.main.first_ip_address 
+  }
+  metadata_startup_script = "${file("startup-script.sh")}"
 
   can_ip_forward      = var.vm_instance.can_ip_forward
   deletion_protection = var.vm_instance.deletion_protection
@@ -95,4 +103,83 @@ resource "google_compute_firewall" "rules" {
   }
   target_tags = var.firewall_rules.target_tags
   source_ranges = var.firewall_rules.source
+}
+
+resource "google_compute_global_address" "default" {
+  provider     = google
+  project      = var.project
+  name         = "global-psconnect-ip2"
+  address_type = "INTERNAL"
+  purpose      = "VPC_PEERING"
+  prefix_length = 16
+  network      = google_compute_network.vpc.self_link
+}
+
+# resource "google_compute_network_peering" "peering" {
+#   name         = "my-network-peering"
+#   network      = google_compute_network.vpc.self_link
+#   peer_network = "https://www.googleapis.com/compute/v1/projects/${var.project}/global/networks/${var.vpc_name}"
+# }
+
+resource "google_service_networking_connection" "my_service_connection" {
+  network = google_compute_network.vpc.id
+  service = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.default.name]
+}
+
+
+
+resource "google_sql_database_instance" "main" {
+  name             = "main-instance"
+  database_version = "MYSQL_5_7"
+  region           = "us-west1"
+  deletion_protection = false
+  
+  depends_on = [ google_service_networking_connection.my_service_connection ]
+
+  settings {
+    # Second-generation instance tiers are based on the machine
+    # type. See argument reference below.
+    tier = "db-f1-micro"
+    availability_type = "REGIONAL"
+    disk_autoresize  = true
+    disk_type        = "pd-ssd"
+    disk_size        = 100
+    
+
+    # database_flags {
+    #   name  = "log_bin_trust_function_creators"
+    #   value = "on"
+    # }
+
+    backup_configuration {
+      enabled = true
+      binary_log_enabled = true
+    }
+
+    ip_configuration {
+      ipv4_enabled    = false
+      private_network = google_compute_network.vpc.self_link
+    }
+
+  
+  }
+
+}
+
+resource "google_sql_database" "database" {
+  name     = "webapp"
+  instance = google_sql_database_instance.main.name
+}
+
+resource "random_password" "password" {
+  length           = 16
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "google_sql_user" "users" {
+  name     = "webapp"
+  instance = google_sql_database_instance.main.name
+  password = random_password.password.result
 }

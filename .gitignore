@@ -6,5 +6,5 @@
 .terraform/
 .DS_Store
 
-*/.tfstate
+*.tfstate
 !.terraform/*.tfstate
