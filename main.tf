@@ -20,12 +20,12 @@ resource "google_compute_subnetwork" "subnets" {
 }
 
 resource "google_compute_route" "webapp_route" {
-  name            = "webapp-route"
-  dest_range      = "0.0.0.0/0"
+  name            = var.webapp_route.name
+  dest_range      = var.webapp_route.dest_range
   network         = google_compute_network.vpc.id
-  next_hop_gateway = "default-internet-gateway"
-  priority        = 1000
-  tags            = ["webapp"]
+  next_hop_gateway = var.webapp_route.next_hop_gateway
+  priority        = var.webapp_route.priority
+  tags            = var.webapp_route.tags
 }
 
 resource "google_compute_instance" "vm_instance" {
@@ -108,18 +108,13 @@ resource "google_compute_firewall" "rules" {
 resource "google_compute_global_address" "default" {
   provider     = google
   project      = var.project
-  name         = "global-psconnect-ip2"
-  address_type = "INTERNAL"
-  purpose      = "VPC_PEERING"
-  prefix_length = 16
+  name         = var.global_address.name
+  address_type = var.global_address.address_type
+  purpose      = var.global_address.purpose
+  prefix_length = var.global_address.prefix_length
   network      = google_compute_network.vpc.self_link
 }
 
-# resource "google_compute_network_peering" "peering" {
-#   name         = "my-network-peering"
-#   network      = google_compute_network.vpc.self_link
-#   peer_network = "https://www.googleapis.com/compute/v1/projects/${var.project}/global/networks/${var.vpc_name}"
-# }
 
 resource "google_service_networking_connection" "my_service_connection" {
   network = google_compute_network.vpc.id
@@ -128,30 +123,22 @@ resource "google_service_networking_connection" "my_service_connection" {
 }
 
 
-
 resource "google_sql_database_instance" "main" {
-  name             = "main-instance"
-  database_version = "MYSQL_5_7"
-  region           = "us-west1"
+  name             = var.db_inst.name
+  database_version = var.db_inst.database_version
+  region           = var.db_inst.region
   deletion_protection = false
   
   depends_on = [ google_service_networking_connection.my_service_connection ]
 
   settings {
-    # Second-generation instance tiers are based on the machine
-    # type. See argument reference below.
-    tier = "db-f1-micro"
-    availability_type = "REGIONAL"
-    disk_autoresize  = true
-    disk_type        = "pd-ssd"
-    disk_size        = 100
     
-
-    # database_flags {
-    #   name  = "log_bin_trust_function_creators"
-    #   value = "on"
-    # }
-
+    tier = var.db_sett.tier
+    availability_type = var.db_sett.availability_type
+    disk_autoresize  = var.db_sett.disk_autoresize
+    disk_type        = var.db_sett.disk_type
+    disk_size        = var.db_sett.disk_size
+    
     backup_configuration {
       enabled = true
       binary_log_enabled = true
@@ -161,25 +148,22 @@ resource "google_sql_database_instance" "main" {
       ipv4_enabled    = false
       private_network = google_compute_network.vpc.self_link
     }
-
-  
   }
-
 }
 
 resource "google_sql_database" "database" {
-  name     = "webapp"
+  name     = var.database
   instance = google_sql_database_instance.main.name
 }
 
 resource "random_password" "password" {
-  length           = 16
-  special          = true
-  override_special = "!#$%&*()-_=+[]{}<>:?"
+  length           = var.password.length
+  special          = var.password.special
+  override_special = var.password.override_special
 }
 
 resource "google_sql_user" "users" {
-  name     = "webapp"
+  name     = var.users
   instance = google_sql_database_instance.main.name
   password = random_password.password.result
 }

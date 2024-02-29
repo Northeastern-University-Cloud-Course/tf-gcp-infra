@@ -106,3 +106,50 @@ variable "shielded_instance_config" {
     enable_vtpm                 = bool
   })
 }
+
+variable "database" {
+  type = string
+}
+variable "password" {
+  type = object({
+    length           = number
+    special          = bool
+    override_special = string
+  })
+}
+variable "users" {
+  type = string
+}
+variable "db_inst" {
+  type = object({
+    name             = string
+    database_version = string
+    region           = string
+  })
+}
+variable "db_sett" {
+  type = object({
+    tier              = string
+    availability_type = string
+    disk_autoresize   = bool
+    disk_type         = string
+    disk_size         = number
+  })
+}
+variable "global_address" {
+  type = object({
+    name         = string
+    address_type = string
+    purpose      = string
+    prefix_length = number
+  })
+}
+variable "webapp_route" {
+  type = object({
+    name            = string
+    dest_range      = string
+    next_hop_gateway = string
+    priority        = number
+    tags            = list(string)
+  })
+}
