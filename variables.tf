@@ -6,6 +6,14 @@ variable "project" {
   description = "The GCP project ID"
 }
 
+variable "role_logging" {
+  description = "role logging"
+}
+
+variable "role_metrics" {
+  description = "role metrics"
+}
+
 variable "region" {
   description = "The region where to create the resources"
 }
@@ -46,6 +54,21 @@ variable "subnets" {
   }))
 }
 
+variable "dns" {
+  type = object({
+    name = string
+    type = string
+    ttl = number
+    managed_zone = string
+  })
+}
+
+variable "serv_acc" {
+  type = object({
+    account_id = string
+    display_name = string
+  })
+}
 
 variable "boot_disk" {
   type = object({
@@ -95,7 +118,6 @@ variable "scheduling" {
 }
 variable "service_account" {
   type = object({
-    email = string
     scopes = list(string)
   })
 }
