@@ -78,7 +78,7 @@ resource "google_compute_instance" "vm_instance" {
   }
 
   service_account {
-    email  = var.service_account.email
+    email  = google_service_account.vm_default.email
     scopes = var.service_account.scopes
   }
 
@@ -166,4 +166,34 @@ resource "google_sql_user" "users" {
   name     = var.users
   instance = google_sql_database_instance.main.name
   password = random_password.password.result
+}
+
+
+resource "google_dns_record_set" "my_record" {
+  name    = var.dns.name
+  type    = var.dns.type
+  ttl     = var.dns.ttl
+  managed_zone = var.dns.managed_zone
+  rrdatas = [google_compute_instance.vm_instance.network_interface[0].access_config[0].nat_ip]
+}
+
+resource "google_service_account" "vm_default"{
+  account_id = var.serv_acc.account_id
+  display_name = var.serv_acc.display_name
+}
+resource "google_project_iam_binding" "iam_binding_admin"{
+  project = var.project
+  role = var.role_logging
+
+  members = [ 
+    "serviceAccount:${google_service_account.vm_default.email}"
+   ]
+}
+resource "google_project_iam_binding" "iam_binding_metric"{
+  project = var.project
+  role = var.role_metrics
+
+  members = [ 
+    "serviceAccount:${google_service_account.vm_default.email}"
+   ]
 }
