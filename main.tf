@@ -195,5 +195,100 @@ resource "google_project_iam_binding" "iam_binding_metric"{
 
   members = [ 
     "serviceAccount:${google_service_account.vm_default.email}"
-   ]
+  ]
 }
+
+# Create a Pub/Sub Topic
+resource "google_pubsub_topic" "topic" {
+  name = "verify_email"
+}
+
+# Create a Pub/Sub Subscription
+resource "google_pubsub_subscription" "subscription" {
+  name  = "sub"
+  topic = google_pubsub_topic.topic.name
+
+  ack_deadline_seconds = 20
+}
+
+resource "google_storage_bucket" "source_code_bucket" {
+  name     = "source-code-cloud-bucket-547"
+  location = var.region
+}
+
+resource "google_storage_bucket_object" "source_code_object" {
+  name   = "source-code-bucket-object"
+  bucket = google_storage_bucket.source_code_bucket.name
+  source = "/Users/sandeshreddy/Downloads/updfunc.zip"
+}
+
+resource "google_vpc_access_connector" "vpc_connector" {
+  name          = "my-vpc-connector"
+  project       = var.project
+  region        = var.region
+  network       = google_compute_network.vpc.name
+  ip_cidr_range = "10.1.0.0/28"
+}
+
+# Create the Cloud Function
+resource "google_cloudfunctions_function" "example_function" {
+  name                  = "PubSubFunction"
+  description           = "My Cloud Function"
+  runtime               = "java17"
+  region                = var.region
+  available_memory_mb   = 256
+  source_archive_bucket = google_storage_bucket.source_code_bucket.name
+  source_archive_object = google_storage_bucket_object.source_code_object.name
+  entry_point           = "gcfv2pubsub.PubSubFunction"
+  
+  event_trigger {
+    event_type = "google.pubsub.topic.publish"
+    resource   = google_pubsub_topic.topic.name
+  }
+  vpc_connector = google_vpc_access_connector.vpc_connector.id
+
+  environment_variables = {
+    DB_USER            = google_sql_user.users.name
+    DB_PASSWORD        = random_password.password.result
+    DB_NAME            = google_sql_database.database.name
+    DB_HOST            = google_sql_database_instance.main.first_ip_address
+    MAILGUN_API_KEY    = var.mailgun_api_key
+    MAILGUN_DOMAIN     = var.mailgun_domain
+  }
+
+  service_account_email = google_service_account.vm_default.email
+}
+
+# IAM policy for Cloud Functions
+resource "google_project_iam_member" "cloud_function_iam" {
+  project = var.project
+  role    = "roles/cloudfunctions.developer"
+  member  = "serviceAccount:${google_service_account.vm_default.email}"
+}
+
+# IAM policy for Pub/Sub Subscription
+resource "google_pubsub_subscription_iam_binding" "subscription_iam" {
+  subscription = google_pubsub_subscription.subscription.name
+  role         = "roles/pubsub.subscriber"
+
+  members = [
+    "serviceAccount:${google_service_account.vm_default.email}",
+  ]
+}
+
+# IAM policy for Cloud Pub/Sub Topic
+resource "google_pubsub_topic_iam_binding" "topic_iam" {
+  topic = google_pubsub_topic.topic.name
+  role  = "roles/pubsub.publisher"
+
+  members = [
+    "serviceAccount:${google_service_account.vm_default.email}",
+  ]
+}
+
+# # Grant the Service Account Token Creator role to the Google-managed service account
+# resource "google_project_iam_member" "token_creator_iam" {
+#   project = var.project
+#   role    = "roles/iam.serviceAccountTokenCreator"
+#   member  = "serviceAccount:service-${var.project}@gcp-sa-pubsub.iam.gserviceaccount.com"
+# }

@@ -10,6 +10,10 @@ variable "role_logging" {
   description = "role logging"
 }
 
+variable "mailgun_domain" {}
+
+variable "mailgun_api_key" {}
+
 variable "role_metrics" {
   description = "role metrics"
 }
