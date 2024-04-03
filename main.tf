@@ -28,16 +28,18 @@ resource "google_compute_route" "webapp_route" {
   tags            = var.webapp_route.tags
 }
 
-resource "google_compute_instance" "vm_instance" {
-  boot_disk {
+
+
+resource "google_compute_region_instance_template" "vm_template" {
+  disk {
     auto_delete = var.boot_disk.auto_delete
     device_name = var.boot_disk.device_name
 
-    initialize_params {
-      image = var.initialize_params.image
-      size  = var.initialize_params.size
+    
+      source_image = var.initialize_params.image
+      disk_size_gb = var.initialize_params.size
       type  = var.initialize_params.type
-    }
+    
 
     mode = var.boot_disk.mode
   }
@@ -50,8 +52,8 @@ resource "google_compute_instance" "vm_instance" {
   metadata_startup_script = "${file("startup-script.sh")}"
 
   can_ip_forward      = var.vm_instance.can_ip_forward
-  deletion_protection = var.vm_instance.deletion_protection
-  enable_display      = var.vm_instance.enable_display
+  # deletion_protection = var.vm_instance.deletion_protection
+  # enable_display      = var.vm_instance.enable_display
 
   labels = {
     goog-ec-src = var.vm_instance.label
@@ -89,8 +91,100 @@ resource "google_compute_instance" "vm_instance" {
   }
 
   tags = var.vm_instance.tags
-  zone = var.vm_instance.zone
+  region = var.region
 }
+
+resource "google_compute_health_check" "default" {
+  name               = var.health_check.name
+  check_interval_sec = var.health_check.check_interval_sec
+  timeout_sec        = var.health_check.timeout_sec
+  healthy_threshold  = var.health_check.healthy_threshold
+  unhealthy_threshold = var.health_check.unhealthy_threshold
+
+  http_health_check {
+    port = var.health_check.port
+    request_path = var.health_check.request_path
+  }
+}
+
+resource "google_compute_region_autoscaler" "default" {
+  name   = var.autoscaler.name
+  region = var.region
+  target = google_compute_region_instance_group_manager.default.id
+
+  depends_on = [ 
+    google_compute_region_instance_group_manager.default
+   ]
+
+  autoscaling_policy {
+    max_replicas    = var.autoscaler.max
+    min_replicas    = var.autoscaler.min
+    cooldown_period = var.autoscaler.cooldown
+    cpu_utilization {
+      target = var.autoscaler.target
+    }
+  }
+}
+
+resource "google_compute_region_instance_group_manager" "default" {
+  name = var.group_manager.name
+  base_instance_name = var.group_manager.base_name
+  region = var.region
+
+  version {
+    name              = var.group_manager.version
+    instance_template = google_compute_region_instance_template.vm_template.self_link
+  }
+ 
+  named_port {
+    name = var.group_manager.port_name
+    port = var.group_manager.port
+  }
+  auto_healing_policies {
+    health_check      = google_compute_health_check.default.id
+    initial_delay_sec = var.group_manager.delay
+  }
+
+}
+
+
+resource "google_compute_managed_ssl_certificate" "default" {
+  name    = var.ssl.name
+  managed {
+    domains = var.ssl.domain
+  }
+}
+
+resource "google_compute_backend_service" "default" {
+  name        = var.backend.name
+  port_name   = var.backend.port_name
+  protocol    = var.backend.protocol
+  timeout_sec = var.backend.timeout
+
+  backend {
+    group = google_compute_region_instance_group_manager.default.instance_group
+  }
+
+  health_checks = [google_compute_health_check.default.id]
+}
+
+resource "google_compute_url_map" "default" {
+  name        = var.url
+  default_service = google_compute_backend_service.default.id
+}
+
+resource "google_compute_target_https_proxy" "default" {
+  name             = var.https
+  url_map          = google_compute_url_map.default.id
+  ssl_certificates = [google_compute_managed_ssl_certificate.default.id]
+}
+
+resource "google_compute_global_forwarding_rule" "https" {
+  name       = var.forwarding_rule.name
+  target     = google_compute_target_https_proxy.default.id
+  port_range = var.forwarding_rule.port
+}
+
 resource "google_compute_firewall" "rules" {
   project     = var.project
   name        = var.firewall_rules.name
@@ -102,7 +196,7 @@ resource "google_compute_firewall" "rules" {
     ports     = var.firewall_rules_allow.ports
   }
   target_tags = var.firewall_rules.target_tags
-  source_ranges = var.firewall_rules.source
+  source_ranges = [google_compute_global_forwarding_rule.https.ip_address, "35.191.0.0/16", "130.211.0.0/22"]
 }
 
 resource "google_compute_global_address" "default" {
@@ -174,7 +268,7 @@ resource "google_dns_record_set" "my_record" {
   type    = var.dns.type
   ttl     = var.dns.ttl
   managed_zone = var.dns.managed_zone
-  rrdatas = [google_compute_instance.vm_instance.network_interface[0].access_config[0].nat_ip]
+  rrdatas = [google_compute_global_forwarding_rule.https.ip_address]
 }
 
 resource "google_service_account" "vm_default"{
@@ -219,7 +313,7 @@ resource "google_storage_bucket" "source_code_bucket" {
 resource "google_storage_bucket_object" "source_code_object" {
   name   = "source-code-bucket-object"
   bucket = google_storage_bucket.source_code_bucket.name
-  source = "/Users/sandeshreddy/Downloads/updfunc.zip"
+  source = "/Users/sandeshreddy/Downloads/cloud_func.zip"
 }
 
 resource "google_vpc_access_connector" "vpc_connector" {

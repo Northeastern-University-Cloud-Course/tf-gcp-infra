@@ -179,3 +179,57 @@ variable "webapp_route" {
     tags            = list(string)
   })
 }
+variable "health_check" {
+  type = object({
+    name               = string
+    check_interval_sec = number
+    timeout_sec        = number
+    healthy_threshold  = number
+    unhealthy_threshold = number
+    port = number
+    request_path = string
+  })
+}
+
+variable "autoscaler" {
+  type = object({
+    name = string
+    min = number
+    max = number
+    cooldown = number
+    target = number
+  }) 
+}
+variable "group_manager" {
+  type = object({
+    name = string
+    base_name = string
+    version = string
+    port_name = string
+    port = number
+    delay = number
+  })
+}
+variable "ssl" {
+  type = object({
+    name = string
+    domain = list(string)
+  })
+}
+variable "backend" {
+  type = object({
+    name = string
+    port_name = string
+    protocol = string
+    timeout = number
+  })
+}
+
+variable "url" {}
+variable "https" {}
+variable "forwarding_rule" {
+  type = object({
+    name = string
+    port = string
+  })
+}
