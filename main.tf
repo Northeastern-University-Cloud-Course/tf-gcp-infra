@@ -3,6 +3,20 @@ provider "google" {
   project     = var.project
 }
 
+terraform {
+  required_providers {
+    google-beta = {
+      source = "hashicorp/google-beta"
+      version = "5.24.0"
+    }
+  }
+}
+
+provider "google-beta" {
+  credentials = file(var.credentials_file)
+  project     = var.project
+}
+
 resource "google_compute_network" "vpc" {
   name                    = var.vpc_name
   auto_create_subnetworks = false
@@ -35,12 +49,12 @@ resource "google_compute_region_instance_template" "vm_template" {
     auto_delete = var.boot_disk.auto_delete
     device_name = var.boot_disk.device_name
 
-    
-      source_image = var.initialize_params.image
-      disk_size_gb = var.initialize_params.size
-      type  = var.initialize_params.type
-    
-
+    disk_encryption_key {
+      kms_key_self_link = google_kms_crypto_key.vm_key.id
+    }
+    source_image = var.initialize_params.image
+    disk_size_gb = var.initialize_params.size
+    type  = var.initialize_params.type
     mode = var.boot_disk.mode
   }
 
@@ -52,44 +66,32 @@ resource "google_compute_region_instance_template" "vm_template" {
   metadata_startup_script = "${file("startup-script.sh")}"
 
   can_ip_forward      = var.vm_instance.can_ip_forward
-  # deletion_protection = var.vm_instance.deletion_protection
-  # enable_display      = var.vm_instance.enable_display
-
   labels = {
     goog-ec-src = var.vm_instance.label
   }
-
   machine_type = var.vm_instance.machine_type
   name         = var.vm_instance.name
 
   network_interface {
-    access_config {
-      network_tier = var.network_interface.network_tier
-    }
-
     queue_count = var.network_interface.queue_count
     stack_type  = var.network_interface.stack_type
     subnetwork  = var.network_interface.subnetwork
   }
-
   scheduling {
     automatic_restart   = var.scheduling.automatic_restart
     on_host_maintenance = var.scheduling.on_host_maintenance
     preemptible         = var.scheduling.preemptible
     provisioning_model  = var.scheduling.provisioning_model
   }
-
   service_account {
     email  = google_service_account.vm_default.email
     scopes = var.service_account.scopes
   }
-
   shielded_instance_config {
     enable_integrity_monitoring = var.shielded_instance_config.enable_integrity_monitoring
     enable_secure_boot          = var.shielded_instance_config.enable_secure_boot
     enable_vtpm                 = var.shielded_instance_config.enable_vtpm
   }
-
   tags = var.vm_instance.tags
   region = var.region
 }
@@ -222,7 +224,7 @@ resource "google_sql_database_instance" "main" {
   database_version = var.db_inst.database_version
   region           = var.db_inst.region
   deletion_protection = false
-  
+  encryption_key_name = google_kms_crypto_key.cloudsql_key.id
   depends_on = [ google_service_networking_connection.my_service_connection ]
 
   settings {
@@ -242,6 +244,9 @@ resource "google_sql_database_instance" "main" {
       ipv4_enabled    = false
       private_network = google_compute_network.vpc.self_link
     }
+
+    
+    # service_account = 
   }
 }
 
@@ -308,6 +313,9 @@ resource "google_pubsub_subscription" "subscription" {
 resource "google_storage_bucket" "source_code_bucket" {
   name     = "source-code-cloud-bucket-547"
   location = var.region
+  encryption {
+    default_kms_key_name = google_kms_crypto_key.storage_key.id
+  }
 }
 
 resource "google_storage_bucket_object" "source_code_object" {
@@ -380,9 +388,78 @@ resource "google_pubsub_topic_iam_binding" "topic_iam" {
   ]
 }
 
-# # Grant the Service Account Token Creator role to the Google-managed service account
-# resource "google_project_iam_member" "token_creator_iam" {
-#   project = var.project
-#   role    = "roles/iam.serviceAccountTokenCreator"
-#   member  = "serviceAccount:service-${var.project}@gcp-sa-pubsub.iam.gserviceaccount.com"
-# }
+resource "google_project_service_identity" "sql_sa" {
+  provider = google-beta
+  project = var.project
+  service = "sqladmin.googleapis.com"
+}
+
+data "google_project" "project" {}
+
+
+resource "google_kms_crypto_key_iam_binding" "kms_vm_binding" {
+  crypto_key_id = google_kms_crypto_key.vm_key.id
+  role          = "roles/owner"
+
+  members = [
+    "serviceAccount:service-${data.google_project.project.number}@compute-system.iam.gserviceaccount.com"
+  ]
+}
+
+resource "google_kms_crypto_key_iam_binding" "kms_storage_binding" {
+  crypto_key_id = google_kms_crypto_key.storage_key.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+
+  members = [
+    "serviceAccount:${data.google_storage_project_service_account.storage_account.email_address}"
+  ]
+}
+
+resource "google_kms_key_ring_iam_binding" "ring_rule" {
+  key_ring_id = google_kms_key_ring.key_ring.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+
+  members = [
+    "serviceAccount:${google_service_account.vm_default.email}"
+  ]
+}
+
+resource "google_kms_crypto_key_iam_binding" "kms_sql_binding" {
+  crypto_key_id = google_kms_crypto_key.cloudsql_key.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+
+  members = [
+    "serviceAccount:${google_project_service_identity.sql_sa.email}"
+  ]
+}
+
+data "google_storage_project_service_account" "storage_account" {}
+
+resource "google_kms_key_ring" "key_ring" {
+  name     = "cloud-dev2-key-ring"
+  location = var.region 
+}
+
+resource "google_kms_crypto_key" "vm_key" {
+  name            = "vm-key"
+  key_ring        = google_kms_key_ring.key_ring.id
+  rotation_period = "2592000s" 
+
+  
+}
+
+resource "google_kms_crypto_key" "cloudsql_key" {
+  name            = "cloudsql-key"
+  key_ring        = google_kms_key_ring.key_ring.id
+  rotation_period = "2592000s" 
+
+  
+}
+
+resource "google_kms_crypto_key" "storage_key" {
+  name            = "storage-key"
+  key_ring        = google_kms_key_ring.key_ring.id
+  rotation_period = "2592000s" 
+
+  
+}

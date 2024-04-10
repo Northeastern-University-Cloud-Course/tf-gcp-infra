@@ -5,6 +5,8 @@
 *.tfstate.backup
 .terraform/
 .DS_Store
-
+.terraform.lock.hcl
 *.tfstate
 !.terraform/*.tfstate
+*/.terraform.*
+**/.terraform.*
